@@ -99,6 +99,10 @@ describe("DXT CLI", () => {
         0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
       ]);
       fs.writeFileSync(join(testDir, "icon.png"), validPngBuffer);
+
+      // Create entry point file referenced by test manifests
+      fs.mkdirSync(join(testDir, "server"), { recursive: true });
+      fs.writeFileSync(join(testDir, "server", "index.js"), "// fixture");
     });
 
     afterAll(() => {
@@ -196,6 +200,9 @@ describe("DXT CLI", () => {
       fs.writeFileSync(join(tempDir, "file1.txt"), "hello");
       fs.mkdirSync(join(tempDir, "subdir"));
       fs.writeFileSync(join(tempDir, "subdir", "file2.txt"), "world");
+      // Create entry point file referenced by manifest
+      fs.mkdirSync(join(tempDir, "server"), { recursive: true });
+      fs.writeFileSync(join(tempDir, "server", "index.js"), "// fixture");
     });
 
     afterAll(() => {
@@ -291,6 +298,10 @@ describe("DXT CLI", () => {
           }),
         );
 
+        // Create entry point file referenced by manifest
+        fs.mkdirSync(join(tempExecDir, "server"), { recursive: true });
+        fs.writeFileSync(join(tempExecDir, "server", "index.js"), "// fixture");
+
         // Create an executable script
         const executableScript = join(tempExecDir, "run-script.sh");
         fs.writeFileSync(
@@ -343,6 +354,83 @@ describe("DXT CLI", () => {
         fs.rmSync(execUnpackedDir, { recursive: true, force: true });
         if (fs.existsSync(execPackedFilePath)) {
           fs.unlinkSync(execPackedFilePath);
+        }
+      }
+    });
+
+    it("should add group+other execute bits on binary entry points during pack", () => {
+      // Skip this test on Windows since it doesn't support Unix permissions
+      if (process.platform === "win32") {
+        return;
+      }
+
+      const tempBinDir = join(__dirname, "temp-binary-entry-test");
+      const binPackedFilePath = join(__dirname, "test-binary-entry.dxt");
+      const binUnpackedDir = join(__dirname, "temp-binary-entry-unpack");
+
+      try {
+        // Create a binary-type extension with owner-only execute (0o700)
+        // This passes validation (has some +x) but pack should add
+        // group+other execute bits for compatibility with CD extraction
+        fs.mkdirSync(join(tempBinDir, "server"), { recursive: true });
+        fs.writeFileSync(
+          join(tempBinDir, "manifest.json"),
+          JSON.stringify({
+            manifest_version: DEFAULT_MANIFEST_VERSION,
+            name: "Test Binary Extension",
+            version: "1.0.0",
+            description: "A test extension with binary entry point",
+            author: {
+              name: "MCPB",
+            },
+            server: {
+              type: "binary",
+              entry_point: "server/myserver",
+              mcp_config: {
+                command: "${__dirname}/server/myserver",
+              },
+            },
+          }),
+        );
+
+        // Create binary entry point with 700 (owner-only execute)
+        fs.writeFileSync(
+          join(tempBinDir, "server", "myserver"),
+          "#!/bin/sh\necho binary",
+        );
+        fs.chmodSync(join(tempBinDir, "server", "myserver"), 0o700);
+
+        // Create a regular file for comparison (should stay 644)
+        fs.writeFileSync(join(tempBinDir, "config.json"), "{}");
+        fs.chmodSync(join(tempBinDir, "config.json"), 0o644);
+
+        // Pack the extension
+        execSync(`node ${cliPath} pack ${tempBinDir} ${binPackedFilePath}`, {
+          encoding: "utf-8",
+        });
+
+        // Unpack to check stored permissions
+        execSync(
+          `node ${cliPath} unpack ${binPackedFilePath} ${binUnpackedDir}`,
+          {
+            encoding: "utf-8",
+          },
+        );
+
+        // Binary entry point should have full execute bits (700 | 111 = 711)
+        const entryStats = fs.statSync(
+          join(binUnpackedDir, "server", "myserver"),
+        );
+        expect(entryStats.mode & 0o777).toBe(0o711);
+
+        // Non-entry-point file should retain original permissions
+        const configStats = fs.statSync(join(binUnpackedDir, "config.json"));
+        expect(configStats.mode & 0o777).toBe(0o644);
+      } finally {
+        fs.rmSync(tempBinDir, { recursive: true, force: true });
+        fs.rmSync(binUnpackedDir, { recursive: true, force: true });
+        if (fs.existsSync(binPackedFilePath)) {
+          fs.unlinkSync(binPackedFilePath);
         }
       }
     });
