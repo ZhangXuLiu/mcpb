@@ -109,4 +109,8 @@ self-signed-key.pem
 invalid-json.json
 **/server/lib/**
 
+# Rust example build artifacts
+examples/calculator-rust/target/
+examples/calculator-rust/server/
+
 .yarn/install-state.gz
