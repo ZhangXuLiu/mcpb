@@ -33,17 +33,6 @@ class ChromeControlServer {
     this.setupHandlers();
   }
 
-  // Helper methods
-  escapeForAppleScript(str) {
-    if (typeof str !== "string") return str;
-    // Basic AppleScript string escaping
-    return str
-      .replace(/\\/g, "\\\\") // Escape backslashes first
-      .replace(/"/g, '\\"') // Then escape double quotes
-      .replace(/\n/g, "\\n") // Escape newlines
-      .replace(/\r/g, "\\r"); // Escape carriage returns
-  }
-
   async checkChromeAvailable() {
     try {
       const script = 'tell application "Google Chrome" to return "available"';
@@ -289,10 +278,23 @@ class ChromeControlServer {
               throw new Error("URL is required and must be a string");
             }
 
-            const escapedUrl = this.escapeForAppleScript(url);
+            try {
+              new URL(url);
+            } catch (error) {
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Error: url is not a valid url - ${error.message}`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+
             const script = new_tab
-              ? `tell application "Google Chrome" to open location "${escapedUrl}"`
-              : `tell application "Google Chrome" to set URL of active tab of front window to "${escapedUrl}"`;
+              ? `tell application "Google Chrome" to open location ${JSON.stringify(url)}`
+              : `tell application "Google Chrome" to set URL of active tab of front window to ${JSON.stringify(url)}`;
 
             await this.executeAppleScript(script);
             return {
@@ -644,8 +646,6 @@ class ChromeControlServer {
               })();
             `;
 
-            const escapedCode = this.escapeForAppleScript(wrappedCode);
-
             const script =
               safeTabId != null
                 ? `
@@ -653,7 +653,7 @@ class ChromeControlServer {
                 repeat with w in windows
                   repeat with t in tabs of w
                     if (id of t as string) is "${safeTabId}" then
-                      set result to execute t javascript "${escapedCode}"
+                      set result to execute t javascript ${JSON.stringify(wrappedCode)}
                       return result
                     end if
                   end repeat
@@ -663,7 +663,7 @@ class ChromeControlServer {
             `
                 : `
               tell application "Google Chrome"
-                execute active tab of front window javascript "${escapedCode}"
+                execute active tab of front window javascript ${JSON.stringify(wrappedCode)}
               end tell
             `;
 
